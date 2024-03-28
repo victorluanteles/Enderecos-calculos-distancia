@@ -1,0 +1,120 @@
+from geopy.geocoders import Nominatim
+from geopy.distance import distance
+from geopy.extra.rate_limiter import RateLimiter
+import requests
+import pandas as pd
+
+def obter_localizacao(endereco):
+    geolocator = Nominatim(user_agent="MeuProjetoCep")
+    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+    location = geocode(endereco)
+    return location
+
+def obter_localizacao_viacep(cep):
+    try:
+        url = f"https://viacep.com.br/ws/{cep}/json/"
+        resposta = requests.get(url)
+        resposta.raise_for_status()  # Lança uma exceção se a solicitação falhar
+        dados = resposta.json()
+        return dados
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao obter dados do ViaCEP: {e}")
+        return None
+    except ValueError as e:
+        print(f"Erro ao decodificar JSON: {e}")
+        return None
+def calcular_distancia(coord_1, coord_2):
+    return distance(coord_1, coord_2).km
+
+# Criando um DataFrame para armazenar todos os dados
+dados_completos = {
+    "CEP": [],
+    "Logradouro": [],
+    "Complemento": [],
+    "Bairro": [],
+    "Cidade": [],
+    "Estado": [],
+    "Latitude GEOPY": [],
+    "Longitude GEOPY": [],
+    "Endereço completo GEOPY": []
+}
+
+
+# O CEP É COLETADO
+ceps = ["30620510", "30130008","33125320", "30160033","30140010","32756108"]  # Exemplo de lista de CEPs
+
+# O CÓDIGO CONSIDERA A LATITUDE DE LONTIGITUDO DOS BAIRROS NÃO DO CEP EXATO
+for cep in ceps:
+    dados_endereco = obter_localizacao_viacep(cep)
+    print(dados_endereco)
+    if "erro" not in dados_endereco:
+        endereco = dados_endereco["bairro"] + " " + dados_endereco["localidade"] + " " + dados_endereco["uf"]
+        localizacao = obter_localizacao(endereco)
+
+        if localizacao:
+            print("CEP:", cep)
+            print("Latitude:", localizacao.latitude)
+            print("Longitude:", localizacao.longitude)
+            print("Endereço completo:", localizacao.address)
+
+            # Adicionando os dados ao DataFrame completo
+            dados_completos["CEP"].append(dados_endereco["cep"])
+            dados_completos["Logradouro"].append(dados_endereco["logradouro"])
+            dados_completos["Complemento"].append(dados_endereco["complemento"])
+            dados_completos["Bairro"].append(dados_endereco["bairro"])
+            dados_completos["Cidade"].append(dados_endereco["localidade"])
+            dados_completos["Estado"].append(dados_endereco["uf"])
+            dados_completos["Latitude GEOPY"].append(localizacao.latitude)
+            dados_completos["Longitude GEOPY"].append(localizacao.longitude)
+            dados_completos["Endereço completo GEOPY"].append(localizacao.address)
+        else:
+            print("=====================================")
+            print("\nLocalização para o CEP {cep} não encontrada.")
+    else:
+        print("=====================================")
+        print("\n Dados do CEP "+cep+" não encontrados.")
+
+# Criando o DataFrame completo
+
+
+
+df_completo = pd.DataFrame(dados_completos)
+coord_1 = (df_completo["Latitude GEOPY"].iloc[0], df_completo["Longitude GEOPY"].iloc[0])
+
+# Calcular distância para todas as outras linhas
+distancias_com_margem_de_erro = []
+
+for index, row in df_completo.iterrows():
+    coord_2 = (row["Latitude GEOPY"], row["Longitude GEOPY"])
+    dist_km = calcular_distancia(coord_1, coord_2)
+
+    # Definir a margem de erro como 5% da distância real
+    margem_erro_percentual = 2 / 100  # 10%
+    margem_erro_km = dist_km * margem_erro_percentual
+
+    # Calcule a distância com a margem de erro
+    dist_km_com_erro = dist_km + margem_erro_km
+
+    distancias_com_margem_de_erro.append(dist_km_com_erro)
+    print("\n")
+    print("Distância entre os dois pontos com margem de erro:", dist_km_com_erro, "km")
+    print("Distância entre os dois pontos original", dist_km, "km")
+
+
+#Adiciona o cep usado na comparação
+df_completo['CEP USADO NA COMPARAÇÃO'] = df_completo["CEP"].iloc[0]
+# Adicione as distâncias calculadas ao DataFrame
+df_completo['DISTANCIA ENTRE BAIRROS POR LATITUDE E LONGITUDE'] = distancias_com_margem_de_erro
+
+
+
+# Visualizar DataFrame
+print(df_completo)
+
+
+
+# Salvando o DataFrame completo em um arquivo Excel
+nome_arquivo = "localizacao_completa.xlsx"
+df_completo.to_excel(nome_arquivo, index=False)
+print(f"Dados salvos em '{nome_arquivo}'")
